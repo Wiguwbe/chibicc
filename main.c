@@ -21,6 +21,7 @@ static bool opt_cc1;
 static bool opt_hash_hash_hash;
 static bool opt_static;
 static bool opt_shared;
+static bool opt_bare;
 static char *opt_MF;
 static char *opt_MT;
 static char *opt_o;
@@ -295,6 +296,11 @@ static void parse_args(int argc, char **argv) {
     if (!strcmp(argv[i], "-shared")) {
       opt_shared = true;
       strarray_push(&ld_extra_args, "-shared");
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-bare")) {
+      opt_bare = true;
       continue;
     }
 
@@ -624,6 +630,10 @@ static void run_linker(StringArray *inputs, char *output) {
   char *libpath = find_libpath();
   char *gcc_libpath = find_gcc_libpath();
 
+  // TODO option to link without stdlib
+  if(opt_bare)
+    goto _ld_args;
+
   if (opt_shared) {
     strarray_push(&arr, format("%s/crti.o", libpath));
     strarray_push(&arr, format("%s/crtbeginS.o", gcc_libpath));
@@ -648,11 +658,16 @@ static void run_linker(StringArray *inputs, char *output) {
     strarray_push(&arr, "/lib64/ld-linux-x86-64.so.2");
   }
 
+_ld_args:
+  // args passed by user must always be passed
   for (int i = 0; i < ld_extra_args.len; i++)
     strarray_push(&arr, ld_extra_args.data[i]);
 
   for (int i = 0; i < inputs->len; i++)
     strarray_push(&arr, inputs->data[i]);
+  
+  if (opt_bare)
+    goto _ld_run;
 
   if (opt_static) {
     strarray_push(&arr, "--start-group");
@@ -674,6 +689,8 @@ static void run_linker(StringArray *inputs, char *output) {
     strarray_push(&arr, format("%s/crtend.o", gcc_libpath));
 
   strarray_push(&arr, format("%s/crtn.o", libpath));
+
+_ld_run:
   strarray_push(&arr, NULL);
 
   run_subprocess(arr.data);

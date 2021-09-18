@@ -105,6 +105,7 @@ static char *cont_label;
 static Node *current_switch;
 
 static Obj *builtin_alloca;
+static Obj *builtin_syscall;
 
 static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
@@ -3331,6 +3332,12 @@ static void declare_builtin_functions(void) {
   ty->params = copy_type(ty_int);
   builtin_alloca = new_gvar("alloca", ty);
   builtin_alloca->is_definition = false;
+  // declare "_syscall" as global function
+  Type *sc_ty = func_type(pointer_to(ty_void));
+  sc_ty->params = copy_type(ty_long);
+  sc_ty->is_variadic = true;
+  builtin_syscall = new_gvar("_syscall", sc_ty);
+  builtin_syscall->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*

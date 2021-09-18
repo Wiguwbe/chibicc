@@ -2,6 +2,7 @@
 
 #define GP_MAX 6
 #define FP_MAX 8
+#define SC_MAX 7
 
 static FILE *output_file;
 static int depth;
@@ -9,6 +10,7 @@ static char *argreg8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
 static char *argreg16[] = {"%di", "%si", "%dx", "%cx", "%r8w", "%r9w"};
 static char *argreg32[] = {"%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"};
 static char *argreg64[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+static char *sysreg64[] = {"%rax", "%rdi", "%rsi", "%rdx", "%r10", "%r8", "%r9"};
 static Obj *current_fn;
 
 static void gen_expr(Node *node);
@@ -882,6 +884,36 @@ static void gen_expr(Node *node) {
     }
 
     int stack_args = push_args(node);
+
+    if(node->lhs->kind == ND_VAR && !strcmp(node->lhs->var->name, "_syscall")) {
+      if(stack_args)
+        error_tok(node->tok, "too many arguments for syscall");
+      // special case, pop for syscall registers
+      int sc = 0;
+      for(Node *arg = node->args; arg; arg = arg->next) {
+        Type *ty = arg->ty;
+        switch(ty->kind) {
+        // disallow some types
+        case TY_STRUCT:
+        case TY_UNION:
+        case TY_FLOAT:
+        case TY_DOUBLE:
+        case TY_LDOUBLE:
+          error_tok(arg->tok, "invalid argument type for syscall");
+        default:
+          if(sc < SC_MAX)
+            pop(sysreg64[sc++]);
+          else
+            error_tok(node->tok, "too many arguments for syscall");
+        }
+      }
+
+      // syscall is simpler
+      println("  syscall");
+
+      return;
+    }
+
     gen_expr(node->lhs);
 
     int gp = 0, fp = 0;
