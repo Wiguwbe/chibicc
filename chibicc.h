@@ -103,6 +103,7 @@ File **get_input_files(void);
 File *new_file(char *name, int file_no, char *contents);
 Token *tokenize_string_literal(Token *tok, Type *basety);
 Token *tokenize(File *file);
+Token *tokenize_buffer(char *buffer, char *orig_filename);
 Token *tokenize_file(char *filename);
 
 #define unreachable() \

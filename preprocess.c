@@ -816,6 +816,41 @@ static Token *include_file(Token *tok, char *path, Token *filename_tok) {
   return append(tok2, tok);
 }
 
+static Token *include_command(Token *tok, char *command, Token *command_tok) {
+  char *p = ({
+    FILE *stream_in, *stream_out;
+    char *buf;
+    size_t buflen;
+
+    stream_in = popen(command, "r");
+    if(!stream_in)
+      error_tok(command_tok, "%s: cannot execute command: %s", command, strerror(errno));
+
+    stream_out = open_memstream(&buf, &buflen);
+
+    // read entire file
+    for (;;) {
+      char _buf[512];
+      int n = fread(_buf, 1, sizeof(_buf), stream_in);
+      if(!n)
+        break;
+      fwrite(_buf, 1, n, stream_out);
+    }
+
+    pclose(stream_in);
+    fflush(stream_out);
+    if(!buflen || buf[buflen-1] != '\n')
+      fputc('\n', stream_out);
+    fputc('\n', stream_out);
+    fclose(stream_out);
+    buf;
+  });
+
+  Token *tok2 = tokenize_buffer(p, command);
+
+  return append(tok2, tok);
+}
+
 // Read #line arguments
 static void read_line_marker(Token **rest, Token *tok) {
   Token *start = tok;
@@ -978,6 +1013,14 @@ static Token *preprocess2(Token *tok) {
 
     if (equal(tok, "error"))
       error_tok(tok, "error");
+
+    if (equal(tok, "exec")) {
+      bool _ignore;
+      char *command = read_include_filename(&tok, tok->next, &_ignore);
+
+      tok = include_command(tok, command, start->next->next);
+      continue;
+    }
 
     // `#`-only line is legal. It's called a null directive.
     if (tok->at_bol)
