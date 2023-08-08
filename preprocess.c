@@ -753,6 +753,31 @@ static char *read_include_filename(Token **rest, Token *tok, bool *is_dquote) {
   error_tok(tok, "expected a filename");
 }
 
+static char *read_template_filename(Token **rest, Token *tok, bool *is_dquote) {
+  // pattern 1: #template "foo.tpl" ...
+  if(tok->kind == TK_STR) {
+    *is_dquote = true;
+    *rest = tok->next;
+    return strndup(tok->loc+1, tok->len-2);
+  }
+
+  // pattern 2: #template <foo.tpl> ...
+  if(equal(tok, "<")) {
+    Token *start = tok;
+    for(; !equal(tok, ">"); tok = tok->next)
+      if(tok->at_bol || tok->kind == TK_EOF)
+        error_tok(tok, "expected '>'");
+
+    *is_dquote = false;
+    *rest = tok->next;
+    return join_tokens(start->next, tok);
+  }
+
+  // no pattern 3
+
+  error_tok(tok, "expected a filename");
+}
+
 // Detect the following "include guard" pattern.
 //
 //   #ifndef FOO_H
@@ -812,6 +837,45 @@ static Token *include_file(Token *tok, char *path, Token *filename_tok) {
   guard_name = detect_include_guard(tok2);
   if (guard_name)
     hashmap_put(&include_guards, path, guard_name);
+
+  return append(tok2, tok);
+}
+
+static Token *include_template(Token *tok, char *path, Token *filename_tok) {
+  // 1. get params (until bol) to hashmap
+  HashMap params = {0};
+  while(!tok->at_bol) {
+    Token *key = tok;
+    Token *eq = key->next;
+    Token *val = eq->next;
+
+    if(key->kind != TK_IDENT && key->kind != TK_KEYWORD)
+      error_tok(tok, "expected identifier (or keyword)\n");
+
+    if(eq->at_bol || val->at_bol)
+      error_tok(tok, "expected '=' and value\n");
+
+    if(!equal (eq, "="))
+      error_tok(tok, "expected '='\n");
+
+    hashmap_put2(&params, key->loc, key->len, val);
+
+    tok = val->next;
+  }
+  // 2. template file
+  char *t_buf;
+  size_t t_buf_len;
+  FILE *stream = open_memstream(&t_buf, &t_buf_len);
+  if(!stream)
+    error("failed to open memory stream: %s", strerror(errno));
+  if(generate_template(path, &params, stream))
+    error_at(path, "template engine did not consume all items");
+  fclose(stream);
+
+  // 3. include (buffer)
+  Token *tok2 = tokenize_buffer(t_buf, path);
+  if(!tok)
+    error_at(path, "could not tokenize template");
 
   return append(tok2, tok);
 }
@@ -978,6 +1042,24 @@ static Token *preprocess2(Token *tok) {
 
     if (equal(tok, "error"))
       error_tok(tok, "error");
+
+    if (equal(tok, "template")) {
+      bool is_dquote;
+      char *filename = read_template_filename(&tok, tok->next, &is_dquote);
+
+      char *path;
+      if(filename[0] != '/' && is_dquote) {
+        path = format("%s/%s", dirname(strdup(start->file->name)), filename);
+        if(file_exists(path)) {
+          tok = include_template(tok, path, start->next->next);
+          continue;
+        }
+      }
+
+      path = search_include_paths(filename);
+      tok = include_template(tok, path ? path : filename, start->next->next);
+      continue;
+    }
 
     // `#`-only line is legal. It's called a null directive.
     if (tok->at_bol)

@@ -103,6 +103,7 @@ File **get_input_files(void);
 File *new_file(char *name, int file_no, char *contents);
 Token *tokenize_string_literal(Token *tok, Type *basety);
 Token *tokenize(File *file);
+Token *tokenize_buffer(char *buffer, char *orig_filename);
 Token *tokenize_file(char *filename);
 
 #define unreachable() \
@@ -444,6 +445,12 @@ void hashmap_put2(HashMap *map, char *key, int keylen, void *val);
 void hashmap_delete(HashMap *map, char *key);
 void hashmap_delete2(HashMap *map, char *key, int keylen);
 void hashmap_test(void);
+
+//
+// template.c
+//
+
+int generate_template(char *template_file, HashMap *params, FILE *output);
 
 //
 // main.c
