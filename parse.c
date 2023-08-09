@@ -145,15 +145,16 @@ static Node *new_sub(Node *lhs, Node *rhs, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *cast(Token **rest, Token *tok);
 static Member *get_struct_member(Type *ty, Token *tok);
+static Member *get_struct_method(Type *ty, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
 static Type *union_decl(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
-static Node *funcall(Token **rest, Token *tok, Node *node);
+static Node *funcall(Token **rest, Token *tok, Node *node, Node *first_arg);
 static Node *unary(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 static Token *parse_typedef(Token *tok, Type *basety);
 static bool is_function(Token *tok);
-static Token *function(Token *tok, Type *basety, VarAttr *attr);
+static Token *function(Token *tok, Type *basety, VarAttr *attr, Type *ty);
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr);
 
 static int align_down(int n, int align) {
@@ -702,6 +703,85 @@ static Type *declarator(Token **rest, Token *tok, Type *ty) {
   ty->name = name;
   ty->name_pos = name_pos;
   return ty;
+}
+
+// this function returns NULL if it fails
+// method = pointers "(" "struct"? ident pointers ident ")" ident "(" func-params
+static Token *method(Token *tok, Type *ty, VarAttr *attr) {
+  ty = pointers(&tok, tok, ty);
+
+
+  if(!equal(tok, "("))
+    return NULL;
+  tok = tok->next;
+
+  if(equal(tok, "struct"))
+    tok = tok->next;
+
+  Token *type_tag = tok;
+  if(tok->kind != TK_IDENT)
+    return NULL;
+  Type *ty2 = find_tag(type_tag);
+  Type *ty_orig = ty2;
+  if(!ty2)
+    return NULL;
+  if(ty2->kind != TY_STRUCT)
+  	error_tok(tok, "methods can only be used with structs");
+  tok = tok->next;
+
+  ty2 = pointers(&tok, tok, ty2);
+
+  Token *arg_name = tok;
+  if(tok->kind != TK_IDENT)
+    return NULL;
+  ty2->name = ty2->name_pos = arg_name;
+
+
+  tok = tok->next;
+  if(!equal(tok, ")"))
+    return NULL;
+  tok = tok->next;
+
+  Token *func_name_tok = tok;
+  if(tok->kind != TK_IDENT)
+    return NULL;
+  tok = tok->next;
+
+  if(!equal(tok, "("))
+    return NULL;
+
+  ty = func_params(&tok, tok->next, ty);
+  ty->name = ty->name_pos = func_name_tok;
+
+
+  // insert first argument on param-list
+  ty2->next = ty->params;
+  ty->params = ty2;
+
+  // change name of function
+  int name_len = 3 + ty_orig->tag->len + ty->name->len;
+  char *s_func_name = (char*)malloc(name_len+1);
+  if(!s_func_name)
+    error("failed to allocate memory: %s", strerror(errno));
+  snprintf(s_func_name, name_len+1, "__%.*s_%.*s",
+                           ty_orig->tag->len, ty_orig->tag->loc,
+                           ty->name->len, ty->name->loc
+  );
+  ty->name->len = name_len;
+  ty->name->loc = s_func_name;
+
+  // insert function as method of struct
+  Member *mem = (Member*)malloc(sizeof(Member));
+  if(!mem)
+    error("failed to allocate memory: %s", strerror(errno));
+  mem->ty = ty;
+  mem->tok = func_name_tok;
+  mem->name = ty->name;
+  mem->next = ty_orig->methods;
+  ty_orig->methods = mem;
+
+  // call `function`
+  return function(tok, ty, attr, ty);
 }
 
 // abstract-declarator = pointers ("(" abstract-declarator ")")? type-suffix
@@ -1778,7 +1858,7 @@ static Node *compound_stmt(Token **rest, Token *tok) {
       }
 
       if (is_function(tok)) {
-        tok = function(tok, basety, &attr);
+        tok = function(tok, basety, &attr, NULL);
         continue;
       }
 
@@ -2660,6 +2740,9 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
   *rest = attribute_list(tok, ty);
 
   if (tag) {
+    // save name in type
+    ty->tag = tag;
+
     // If this is a redefinition, overwrite a previous type.
     // Otherwise, register the struct type.
     Type *ty2 = hashmap_get2(&scope->tags, tag->loc, tag->len);
@@ -2753,6 +2836,25 @@ static Member *get_struct_member(Type *ty, Token *tok) {
   return NULL;
 }
 
+// Find a struct method by name.
+static Member *get_struct_method(Type *ty, Token *tok) {
+  for (Member *mem = ty->methods; mem; mem = mem->next) {
+    // Anonymous struct member
+    if ((mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) &&
+        !mem->name) {
+      if (get_struct_member(mem->ty, tok))
+        return mem;
+      continue;
+    }
+
+    // Regular struct member
+    if (mem->name->len == tok->len &&
+        !strncmp(mem->name->loc, tok->loc, tok->len))
+      return mem;
+  }
+  return NULL;
+}
+
 // Create a node representing a struct member access, such as foo.bar
 // where foo is a struct and bar is a member name.
 //
@@ -2766,7 +2868,7 @@ static Member *get_struct_member(Type *ty, Token *tok) {
 // member "a" of the anonymous struct as "x.a".
 //
 // This function takes care of anonymous structs.
-static Node *struct_ref(Node *node, Token *tok) {
+static Node *struct_ref(Node *node, Token **rest, Token *tok) {
   add_type(node);
   if (node->ty->kind != TY_STRUCT && node->ty->kind != TY_UNION)
     error_tok(node->tok, "not a struct nor a union");
@@ -2775,14 +2877,64 @@ static Node *struct_ref(Node *node, Token *tok) {
 
   for (;;) {
     Member *mem = get_struct_member(ty, tok);
-    if (!mem)
-      error_tok(tok, "no such member");
+    if (!mem) {
+      //error_tok(tok, "no such member");
+      // try to look for a function then
+      char str_func_name[256];
+      Token func_name = {
+        .kind = TK_IDENT,
+        .loc = str_func_name,
+        .len = snprintf(str_func_name, 256, "__%.*s_%.*s",
+                        ty->tag->len, ty->tag->loc,
+                        tok->len, tok->loc)
+      };
+      mem = get_struct_method(ty, &func_name);
+      if(!mem)
+        error_tok(tok, "no such member or method");
+
+      // it's a method
+      // method call
+      // 1. node = ident(func_name);
+      Token *fake_ptr;
+      // primary is getting the function address
+      Node *new_node = primary(&fake_ptr, mem->name);
+      add_type(new_node);
+
+      // 2. node = methodcall(node, func_name);
+      if(!equal(tok->next, "("))
+        error_tok(tok, "expected function call to method");
+      // first argument is the previous node (`node`), with more or less pointers
+      int ptrs_need = 0;
+      Type *ty2 = new_node->ty->params;
+      while(ty2->kind == TY_PTR) {
+        ptrs_need++;
+        ty2 = ty2->base;
+      }
+      // desired type is the type of the first param of the function
+      Type *ty3 = ty;
+      while(ty3->kind == TY_PTR) {
+        ptrs_need --;
+        ty3 = ty3->base;
+      }
+      // add address (because member access is previously translated to
+      // a direct access, the base value has the base type, no pointers)
+      if(ptrs_need < 0)
+        error_tok(tok, "unexpected type of struct into method");
+      while(ptrs_need--)
+        node = new_unary(ND_ADDR, node, tok);
+      add_type(node);
+
+      // prepare for call
+      return funcall(rest, tok->next->next, new_node, node);
+
+    }
     node = new_unary(ND_MEMBER, node, tok);
     node->member = mem;
     if (mem->name)
       break;
     ty = mem->ty;
   }
+  *rest = tok->next;
   return node;
 }
 
@@ -2811,6 +2963,7 @@ static Node *postfix(Token **rest, Token *tok) {
     Type *ty = typename(&tok, tok->next);
     tok = skip(tok, ")");
 
+
     if (scope->next == NULL) {
       Obj *var = new_anon_gvar(ty);
       gvar_initializer(rest, tok, var);
@@ -2827,7 +2980,7 @@ static Node *postfix(Token **rest, Token *tok) {
 
   for (;;) {
     if (equal(tok, "(")) {
-      node = funcall(&tok, tok->next, node);
+      node = funcall(&tok, tok->next, node, NULL);
       continue;
     }
 
@@ -2841,16 +2994,14 @@ static Node *postfix(Token **rest, Token *tok) {
     }
 
     if (equal(tok, ".")) {
-      node = struct_ref(node, tok->next);
-      tok = tok->next->next;
+      node = struct_ref(node, &tok, tok->next);
       continue;
     }
 
     if (equal(tok, "->")) {
       // x->y is short for (*x).y
       node = new_unary(ND_DEREF, node, tok);
-      node = struct_ref(node, tok->next);
-      tok = tok->next->next;
+      node = struct_ref(node, &tok, tok->next);
       continue;
     }
 
@@ -2872,7 +3023,7 @@ static Node *postfix(Token **rest, Token *tok) {
 }
 
 // funcall = (assign ("," assign)*)? ")"
-static Node *funcall(Token **rest, Token *tok, Node *fn) {
+static Node *funcall(Token **rest, Token *tok, Node *fn, Node *first_arg) {
   add_type(fn);
 
   if (fn->ty->kind != TY_FUNC &&
@@ -2884,6 +3035,12 @@ static Node *funcall(Token **rest, Token *tok, Node *fn) {
 
   Node head = {};
   Node *cur = &head;
+
+  if(first_arg) {
+    // skip first parameter
+    param_ty = param_ty->next;
+    // don't insert arg yet, to avoid collision with parser below
+  }
 
   while (!equal(tok, ")")) {
     if (cur != &head)
@@ -2906,6 +3063,11 @@ static Node *funcall(Token **rest, Token *tok, Node *fn) {
     }
 
     cur = cur->next = arg;
+  }
+
+  if(first_arg) {
+    first_arg->next = head.next;
+    head.next = first_arg;
   }
 
   if (param_ty)
@@ -3196,8 +3358,9 @@ static void mark_live(Obj *var) {
   }
 }
 
-static Token *function(Token *tok, Type *basety, VarAttr *attr) {
-  Type *ty = declarator(&tok, tok, basety);
+static Token *function(Token *tok, Type *basety, VarAttr *attr, Type *ty) {
+  if(!ty)
+    ty = declarator(&tok, tok, basety);
   if (!ty->name)
     error_tok(ty->name_pos, "function name omitted");
   char *name_str = get_ident(ty->name);
@@ -3340,6 +3503,7 @@ Obj *parse(Token *tok) {
 
   while (tok->kind != TK_EOF) {
     VarAttr attr = {};
+    Token *ptr;
     Type *basety = declspec(&tok, tok, &attr);
 
     // Typedef
@@ -3348,9 +3512,16 @@ Obj *parse(Token *tok) {
       continue;
     }
 
+    // Method
+    ptr = method(tok, basety, &attr);
+    if(ptr) {
+      tok = ptr;
+      continue;
+    }
+
     // Function
     if (is_function(tok)) {
-      tok = function(tok, basety, &attr);
+      tok = function(tok, basety, &attr, NULL);
       continue;
     }
 

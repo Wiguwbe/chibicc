@@ -348,6 +348,8 @@ struct Type {
 
   // Struct
   Member *members;
+  Member *methods;
+  Token *tag;
   bool is_flexible;
   bool is_packed;
 
