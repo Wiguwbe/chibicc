@@ -1210,13 +1210,16 @@ static void gen_stmt(Node *node) {
     if (node->cond) {
       gen_expr(node->cond);
       cmp_zero(node->cond->ty);
-      println("  je %s", node->brk_label);
+      println("  je .L.end.%d", c);
     }
     gen_stmt(node->then);
     println("%s:", node->cont_label);
     if (node->inc)
       gen_expr(node->inc);
     println("  jmp .L.begin.%d", c);
+    println(".L.end.%d:", c);
+    if(node->els)
+      gen_stmt(node->els);
     println("%s:", node->brk_label);
     return;
   }

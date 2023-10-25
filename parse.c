@@ -1534,8 +1534,8 @@ static Node *asm_stmt(Token **rest, Token *tok) {
 //      | "switch" "(" expr ")" stmt
 //      | "case" const-expr ("..." const-expr)? ":" stmt
 //      | "default" ":" stmt
-//      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
-//      | "while" "(" expr ")" stmt
+//      | "for" "(" expr-stmt expr? ";" expr? ")" stmt ("else" stmt)?
+//      | "while" "(" expr ")" stmt ("else" stmt)?
 //      | "do" stmt "while" "(" expr ")" ";"
 //      | "asm" asm-stmt
 //      | "goto" (ident | "*" expr) ";"
@@ -1658,11 +1658,14 @@ static Node *stmt(Token **rest, Token *tok) {
       node->inc = expr(&tok, tok);
     tok = skip(tok, ")");
 
-    node->then = stmt(rest, tok);
+    node->then = stmt(&tok, tok);
 
     leave_scope();
     brk_label = brk;
     cont_label = cont;
+    if (equal(tok, "else"))
+      node->els = stmt(&tok, tok->next);
+    *rest = tok;
     return node;
   }
 
@@ -1677,10 +1680,14 @@ static Node *stmt(Token **rest, Token *tok) {
     brk_label = node->brk_label = new_unique_name();
     cont_label = node->cont_label = new_unique_name();
 
-    node->then = stmt(rest, tok);
+    node->then = stmt(&tok, tok);
 
     brk_label = brk;
     cont_label = cont;
+
+    if(equal(tok, "else"))
+      node->els = stmt(&tok, tok->next);
+    *rest = tok;
     return node;
   }
 
