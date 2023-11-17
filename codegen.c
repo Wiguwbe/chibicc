@@ -1579,6 +1579,17 @@ static void emit_text(Obj *prog) {
     println("  mov %%rbp, %%rsp");
     println("  pop %%rbp");
     println("  ret");
+
+    if (fn->ty->f_attributes & FA_CONSTRUCTOR) {
+      println("  .section .init_array,\"aw\"");
+      println("  .align 8");
+      println("  .quad %s", fn->name);
+    }
+    if (fn->ty->f_attributes & FA_DESTRUCTOR) {
+      println("  .section .fini_array,\"aw\"");
+      println("  .align 8");
+      println("  .quad %s", fn->name);
+    }
   }
 }
 

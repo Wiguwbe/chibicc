@@ -317,6 +317,10 @@ typedef enum {
   TY_UNION,
 } TypeKind;
 
+// function attributes
+#define FA_CONSTRUCTOR 1
+#define FA_DESTRUCTOR  2
+
 struct Type {
   TypeKind kind;
   int size;           // sizeof() value
@@ -356,6 +360,7 @@ struct Type {
   Type *params;
   bool is_variadic;
   Type *next;
+  int f_attributes;
 };
 
 // Struct member

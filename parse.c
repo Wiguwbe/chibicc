@@ -2620,6 +2620,16 @@ static Token *attribute_list(Token *tok, Type *ty) {
         continue;
       }
 
+      if (consume(&tok, tok, "constructor")) {
+        ty->f_attributes |= FA_CONSTRUCTOR;
+        continue;
+      }
+
+      if (consume(&tok, tok, "destructor")) {
+        ty->f_attributes |= FA_DESTRUCTOR;
+        continue;
+      }
+
       error_tok(tok, "unknown attribute");
     }
 
@@ -3197,7 +3207,11 @@ static void mark_live(Obj *var) {
 }
 
 static Token *function(Token *tok, Type *basety, VarAttr *attr) {
+  Token *attr_init = tok;
+  Token *attr_fini = tok = attribute_list(tok, basety);
   Type *ty = declarator(&tok, tok, basety);
+  if (attr_fini != attr_init) // re-apply to function type
+    attribute_list(attr_init, ty);
   if (!ty->name)
     error_tok(ty->name_pos, "function name omitted");
   char *name_str = get_ident(ty->name);
@@ -3295,6 +3309,8 @@ static bool is_function(Token *tok) {
     return false;
 
   Type dummy = {};
+  Type dummy2 = {};
+  tok = attribute_list(tok, &dummy2);
   Type *ty = declarator(&tok, tok, &dummy);
   return ty->kind == TY_FUNC;
 }
