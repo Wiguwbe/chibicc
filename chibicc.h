@@ -320,6 +320,7 @@ typedef enum {
 // function attributes
 #define FA_CONSTRUCTOR 1
 #define FA_DESTRUCTOR  2
+#define FA_UNITTEST    4
 
 struct Type {
   TypeKind kind;
@@ -459,4 +460,6 @@ bool file_exists(char *path);
 extern StringArray include_paths;
 extern bool opt_fpic;
 extern bool opt_fcommon;
+extern bool opt_unittest;
+extern bool opt_genmain;
 extern char *base_file;

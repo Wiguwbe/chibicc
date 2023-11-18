@@ -7,6 +7,8 @@ typedef enum {
 StringArray include_paths;
 bool opt_fcommon = true;
 bool opt_fpic;
+bool opt_unittest = false;
+bool opt_genmain = false;
 
 static FileType opt_x;
 static StringArray opt_include;
@@ -313,6 +315,16 @@ static void parse_args(int argc, char **argv) {
     if (!strcmp(argv[i], "-hashmap-test")) {
       hashmap_test();
       exit(0);
+    }
+
+    if (!strcmp(argv[i], "-unittest")) {
+      opt_unittest = true;
+      continue;
+    }
+
+    if (!strcmp(argv[i], "-genmain")) {
+      opt_genmain = true;
+      continue;
     }
 
     // These options are ignored for now.

@@ -1472,6 +1472,9 @@ static void emit_text(Obj *prog) {
     if (!fn->is_function || !fn->is_definition)
       continue;
 
+    if ((fn->ty->f_attributes & FA_UNITTEST) && !opt_unittest)
+      continue;
+
     // No code is emitted for "static inline" functions
     // if no one is referencing them.
     if (!fn->is_live)
@@ -1590,6 +1593,16 @@ static void emit_text(Obj *prog) {
       println("  .align 8");
       println("  .quad %s", fn->name);
     }
+  }
+
+  if (opt_genmain) {
+    // simple function, no args, return 0
+    println("  .globl main");
+    println("  .text");
+    println("  .type main, @function");
+    println("main:");
+    println("  xor %%rax,%%rax");
+    println("  ret");
   }
 }
 

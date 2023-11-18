@@ -3275,6 +3275,36 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   return tok;
 }
 
+static Token *_unittest(Token *tok) {
+  tok = skip(tok, "unittest");
+  // TODO allow to specify a test name?
+  Type *ty = func_type(ty_void);
+  ty->params = NULL;
+  ty->f_attributes = FA_CONSTRUCTOR | FA_UNITTEST;
+  Obj *fn = new_anon_gvar(ty);
+  fn->is_function = true;
+  fn->is_definition = true;
+  fn->is_static = false;
+  fn->is_inline = false;
+  fn->is_root = true;
+
+  current_fn = fn;
+  locals = NULL;
+  enter_scope();
+  create_param_lvars(ty->params);
+
+  fn->params = locals;
+  fn->alloca_bottom = new_lvar("__alloca_size__", pointer_to(ty_char));
+
+  tok = skip(tok, "{");
+
+  fn->body = compound_stmt(&tok, tok);
+  fn->locals = locals;
+  leave_scope();
+  resolve_goto_labels();
+  return tok;
+}
+
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr) {
   bool first = true;
 
@@ -3349,12 +3379,17 @@ static void declare_builtin_functions(void) {
   builtin_alloca->is_definition = false;
 }
 
-// program = (typedef | function-definition | global-variable)*
+// program = (unittest | typedef | function-definition | global-variable)*
 Obj *parse(Token *tok) {
   declare_builtin_functions();
   globals = NULL;
 
   while (tok->kind != TK_EOF) {
+    if (equal(tok, "unittest")) {
+      tok = _unittest(tok);
+      continue;
+    }
+
     VarAttr attr = {};
     Type *basety = declspec(&tok, tok, &attr);
 

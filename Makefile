@@ -17,6 +17,11 @@ test/%.exe: chibicc test/%.c
 	./chibicc -Iinclude -Itest -c -o test/$*.o test/$*.c
 	$(CC) -pthread -o $@ test/$*.o -xc test/common
 
+# special case to test unittest/genmain
+test/unittest.exe: test/unittest.c chibicc
+	./chibicc -Iinclude -Itest -unittest -genmain -c -o test/unittest.o $<
+	$(CC) -pthread -o $@ test/unittest.o -xc test/common
+
 test: $(TESTS)
 	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
 	test/driver.sh ./chibicc
