@@ -2,7 +2,7 @@
 
 _a fun POC_
 
-Struct functions, similar to Go's methods.
+Struct functions, similar to C2 (or C3?).
 
 This feature allows to associate a function with a struct, giving a better
 understanding of the relationship between functions and datatypes.
@@ -12,20 +12,17 @@ Only structs can be used with methods.
 ### Syntax
 
 ```
-DECLSPEC (STRUCT? TAG POINTERS IDENT) FUNC_NAME(...) ...
+DECLSPEC TAG "." FUNC_NAME "(" POINTERS IDENT (, ...)? ")" ...
 ```
 
 Example:
 ```
-int (struct Point *p) dot() ...
-int (struct foo f) bar(int baz) { ...
+int Point.dot(*p) { ...
+int foo.bar(f, baz) { ...
 ```
 
-The "argument" inside the parenthesis will also be the first argument
-to the function.
-
-When calling a method, the value will be used as the first argument
-of the function.
+The first argument will be of the struct type, so the first argument doesn't
+need the type, only the pointers and name.
 
 ### Internals
 

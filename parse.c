@@ -707,40 +707,27 @@ static Type *declarator(Token **rest, Token *tok, Type *ty) {
 
 // this function returns NULL if it fails
 // method = pointers "(" "struct"? ident pointers ident ")" ident "(" func-params
+// method = pointers ident.ident "(" func-params
 static Token *method(Token *tok, Type *ty, VarAttr *attr) {
   ty = pointers(&tok, tok, ty);
-
-
-  if(!equal(tok, "("))
-    return NULL;
-  tok = tok->next;
-
-  if(equal(tok, "struct"))
-    tok = tok->next;
 
   Token *type_tag = tok;
   if(tok->kind != TK_IDENT)
     return NULL;
+
+  tok = tok->next;
+  if(tok->kind != TK_PUNCT || !equal(tok, "."))
+    return NULL;
+
   Type *ty2 = find_tag(type_tag);
   Type *ty_orig = ty2;
   if(!ty2)
     return NULL;
   if(ty2->kind != TY_STRUCT)
-  	error_tok(tok, "methods can only be used with structs");
+    error_tok(tok, "methods can only be used with structs");
   tok = tok->next;
 
-  ty2 = pointers(&tok, tok, ty2);
-
-  Token *arg_name = tok;
-  if(tok->kind != TK_IDENT)
-    return NULL;
-  ty2->name = ty2->name_pos = arg_name;
-
-
-  tok = tok->next;
-  if(!equal(tok, ")"))
-    return NULL;
-  tok = tok->next;
+  // arg name is later
 
   Token *func_name_tok = tok;
   if(tok->kind != TK_IDENT)
@@ -750,9 +737,21 @@ static Token *method(Token *tok, Type *ty, VarAttr *attr) {
   if(!equal(tok, "("))
     return NULL;
 
-  ty = func_params(&tok, tok->next, ty);
-  ty->name = ty->name_pos = func_name_tok;
+  // get first argument
+  tok = tok->next;
+  ty2 = pointers(&tok, tok, ty2);
 
+  Token *arg_name = tok;
+  if(tok->kind != TK_IDENT)
+    return NULL;
+  ty2->name = ty2->name_pos = arg_name;
+  tok = tok->next;
+
+  // parse the rest of the arguments
+  if(equal(tok, ","))
+    tok = tok->next;
+  ty = func_params(&tok, tok, ty);
+  ty->name = ty->name_pos = func_name_tok;
 
   // insert first argument on param-list
   ty2->next = ty->params;

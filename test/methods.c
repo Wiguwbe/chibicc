@@ -6,11 +6,11 @@ struct foo {
   int b;
 };
 
-int (struct foo *f) sum() {
+int foo.sum(*f) {
   return f->a + f->b;
 }
 
-struct foo (struct foo f) mul_point(int mult) {
+struct foo foo.mul_point(f, int mult) {
   return (struct foo){ f.a * mult, f.b * mult };
 }
 
